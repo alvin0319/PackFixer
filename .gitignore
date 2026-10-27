@@ -1,0 +1,12 @@
+build/
+dist/
+cmake-build-*/
+.idea/
+*.user
+
+# Research data, dumps, logs and notes
+workspace/
+
+# Python tooling cache
+__pycache__/
+.venv/

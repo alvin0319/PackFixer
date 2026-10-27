@@ -1,0 +1,79 @@
+name: build
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      LLVM_VERSION: "21"
+      XWIN_VERSION: "0.10.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: lukka/get-cmake@latest
+
+      - name: Install LLVM
+        run: |
+          wget -qO llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh "$LLVM_VERSION"
+          sudo apt-get install -y "lld-$LLVM_VERSION" "llvm-$LLVM_VERSION"
+          echo "LLVM_BIN=/usr/lib/llvm-$LLVM_VERSION/bin" >> "$GITHUB_ENV"
+
+      - name: Cache Windows SDK and CRT
+        id: xwin-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.xwin
+          key: xwin-${{ env.XWIN_VERSION }}
+
+      - name: Fetch Windows SDK and CRT
+        if: steps.xwin-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p xwin-bin
+          curl -fsSL "https://github.com/Jake-Shadle/xwin/releases/download/${XWIN_VERSION}/xwin-${XWIN_VERSION}-x86_64-unknown-linux-musl.tar.gz" | tar -xz -C xwin-bin
+          "$(find xwin-bin -type f -name xwin | head -n 1)" --accept-license splat --output "$HOME/.xwin"
+
+      - name: Check the toolchain
+        run: |
+          "$LLVM_BIN/clang-cl" --version
+          "$LLVM_BIN/lld-link" --version
+          ninja --version
+          cmake --version
+
+      - name: Configure
+        run: cmake --preset release
+
+      - name: Build
+        run: cmake --build --preset release
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p dist
+          cp build/release/packfix_bump.dll dist/
+          cp README.md dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: packfixer
+          path: dist/
+          if-no-files-found: error
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
